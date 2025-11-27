@@ -56,7 +56,7 @@ processed = df.select(
 
 
 
-# ✅ Updated: 5-min sliding window with 30s step
+# Updated: 5-min sliding window with 30s step
 ## Now applying windowed aggregation for calculating moving average.
 ## - withWatermark: Specifies a watermark on the 'timestamp' column to handle late data.
 ##  "3 minutes" means data arriving up to 3 minutes late will be processed; older data might be dropped.
@@ -123,6 +123,6 @@ query = output.select(
 
 # Await termination of the streaming query.
 # This keeps the application running until the query is terminated manually or due to an error.
-print("✅ Spark streaming (5-min window) started and writing to topic: indian_avg")
+print("Spark streaming (5-min window) started and writing to topic: indian_avg")
 query.awaitTermination()
 
