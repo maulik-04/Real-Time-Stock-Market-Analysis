@@ -44,14 +44,14 @@ def get_stock_quote(symbol):
         print(f"Response: {response.status_code} {response.text[:200]}")
         
         if response.status_code == 401:
-            print("❌ Token expired. Regenerate it here:")
+            print("Token expired. Regenerate it here:")
             print(f"https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id={API_KEY}&redirect_uri=https://127.0.0.1")
             return None
 
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"🚨 Error: {e}")
+        print(f"Error: {e}")
         return None
 
 # Continuously producing data
@@ -59,7 +59,7 @@ def produce_data():
     symbol_index = 0
     while True:
         symbol = INDIAN_SYMBOLS[symbol_index]
-        print(f"\n🔄 Processing {symbol}...")
+        print(f"\nProcessing {symbol}...")
         data = get_stock_quote(symbol)
         
         if data and 'data' in data:
@@ -91,7 +91,7 @@ def produce_data():
 
 ## Main entry point
 if __name__ == "__main__":
-    print("🚀 Starting Producer")
-    print("ℹ️ Using Upstox instrument keys")
+    print("Starting Producer")
+    print("Using Upstox instrument keys")
     produce_data()
 
