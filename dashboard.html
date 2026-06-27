@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NSE Real-Time Market Data</title>
+
+  <!-- Chart.js + Luxon time adapter + Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.6.1/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.9.0/dist/axios.min.js"></script>
+
+  <style>
+    :root {
+      --saffron : #FF9933;
+      --green   : #138808;
+      --blue    : #000080;
+      --red     : #e53e3e;
+      --bg      : #f8fafc;
+      --card-bg : #ffffff;
+      --shadow  : 0 4px 12px rgba(0,0,0,0.07);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      padding: 20px;
+      color: #1e293b;
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, var(--saffron), var(--green));
+      color: white;
+      padding: 24px 32px;
+      border-radius: 14px;
+      text-align: center;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+    header h1 { font-size: 1.8rem; margin-bottom: 6px; }
+    header p  { opacity: 0.9; font-size: 0.95rem; }
+
+    /* ── Per-symbol stat cards ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 18px 22px;
+      box-shadow: var(--shadow);
+      border-left: 5px solid #e2e8f0;  /* overridden per symbol via JS */
+    }
+
+    .stat-card .symbol-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      letter-spacing: 0.04em;
+    }
+
+    .stat-card .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .stat-card .label { color: #64748b; font-size: 0.85rem; }
+    .stat-card .value { font-size: 1.15rem; font-weight: 600; }
+
+    .stat-card .no-data {
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-top: 6px;
+    }
+
+    /* ── Chart ── */
+    .chart-wrap {
+      background: var(--card-bg);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      height: 480px;
+      margin-bottom: 20px;
+    }
+
+    /* ── Status bar ── */
+    #status-bar {
+      text-align: center;
+      color: #64748b;
+      font-size: 0.88rem;
+      padding: 10px;
+    }
+
+    footer {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      padding: 16px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+
+  <header>
+    <h1>🇮🇳 NSE Real-Time Market Data</h1>
+    <p>Powered by Upstox API → Apache Kafka → Apache Spark → Flask</p>
+  </header>
+
+  <!-- One card per symbol, populated by JS -->
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <div class="chart-wrap">
+    <canvas id="priceChart"></canvas>
+  </div>
+
+  <div id="status-bar">Waiting for data…</div>
+
+  <footer>5-minute sliding moving average · refreshes every 3 s · timestamps in IST</footer>
+
+</div>
+
+<script>
+  // ── Symbol colours — match the Indian flag palette ──────────────────────
+  const SYMBOL_COLORS = {
+    RELIANCE : "#FF9933",   // saffron
+    TCS      : "#138808",   // green
+    HDFCBANK : "#000080",   // navy
+    INFY     : "#e53e3e",   // red
+  };
+
+  function colorFor(symbol) {
+    return SYMBOL_COLORS[symbol] || "#6366f1";
+  }
+
+  // ── Chart setup ─────────────────────────────────────────────────────────
+  const ctx   = document.getElementById("priceChart").getContext("2d");
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: { datasets: [] },
+    options: {
+      responsive        : true,
+      maintainAspectRatio: false,
+      animation         : { duration: 300 },
+      plugins: {
+        legend : { position: "top" },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ₹${ctx.parsed.y.toFixed(2)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: "time",
+          time: { unit: "minute", tooltipFormat: "HH:mm:ss" },
+          adapters: { date: { locale: "en-IN" } },
+          title: { display: true, text: "Time (IST)" },
+        },
+        y: {
+          title: { display: true, text: "5-min Moving Avg Price (₹)" },
+          ticks: { callback: v => "₹" + v.toLocaleString("en-IN") },
+        },
+      },
+    },
+  });
+
+  // ── Stat cards ──────────────────────────────────────────────────────────
+  const statsGrid = document.getElementById("stats-grid");
+
+  // Create a card for every known symbol upfront so the grid is stable
+  const SYMBOLS = Object.keys(SYMBOL_COLORS);
+  const cardEls  = {};   // symbol → DOM element refs
+
+  SYMBOLS.forEach(sym => {
+    const color = colorFor(sym);
+    const card  = document.createElement("div");
+    card.className = "stat-card";
+    card.style.borderLeftColor = color;
+    card.innerHTML = `
+      <div class="symbol-name" style="color:${color}">${sym}</div>
+      <p class="no-data" id="nd-${sym}">No data yet…</p>
+      <div id="rows-${sym}" style="display:none">
+        <div class="row">
+          <span class="label">Last Price</span>
+          <span class="value" id="ltp-${sym}">₹—</span>
+        </div>
+        <div class="row">
+          <span class="label">5-min Avg</span>
+          <span class="value" id="avg-${sym}">₹—</span>
+        </div>
+        <div class="row">
+          <span class="label">Window</span>
+          <span class="label" id="win-${sym}">—</span>
+        </div>
+      </div>
+    `;
+    statsGrid.appendChild(card);
+    cardEls[sym] = card;
+  });
+
+  // ── Main update loop ────────────────────────────────────────────────────
+  function toIST(utcStr) {
+    // Convert a UTC timestamp string to a short HH:mm IST string
+    try {
+      return new Date(utcStr).toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch { return "—"; }
+  }
+
+  function updateDashboard() {
+    axios.get("/data")
+      .then(response => {
+        const bySymbol = response.data;   // { RELIANCE: [...], TCS: [...], ... }
+
+        if (!bySymbol || Object.keys(bySymbol).length === 0) return;
+
+        // ── Update chart datasets ──────────────────────────────────────
+        chart.data.datasets = Object.entries(bySymbol).map(([sym, points]) => ({
+          label          : sym,
+          // Each point: x = window start time, y = 5-min moving average
+          data           : points.map(p => ({ x: new Date(p.start), y: p.avg })),
+          borderColor    : colorFor(sym),
+          backgroundColor: "transparent",
+          borderWidth    : 2,
+          pointRadius    : 3,
+          fill           : false,
+          tension        : 0.2,
+        }));
+        chart.update();
+
+        // ── Update stat cards ─────────────────────────────────────────
+        Object.entries(bySymbol).forEach(([sym, points]) => {
+          if (!points || points.length === 0) return;
+
+          // Most recent data point = last element (buffer is append-only)
+          const latest = points[points.length - 1];
+
+          const ndEl   = document.getElementById(`nd-${sym}`);
+          const rowsEl = document.getElementById(`rows-${sym}`);
+          if (ndEl)   ndEl.style.display   = "none";
+          if (rowsEl) rowsEl.style.display = "block";
+
+          const ltpEl = document.getElementById(`ltp-${sym}`);
+          const avgEl = document.getElementById(`avg-${sym}`);
+          const winEl = document.getElementById(`win-${sym}`);
+          if (ltpEl) ltpEl.textContent = "₹" + latest.ltp.toFixed(2);
+          if (avgEl) avgEl.textContent = "₹" + latest.avg.toFixed(2);
+          if (winEl) winEl.textContent = `${toIST(latest.start)} – ${toIST(latest.end)}`;
+        });
+
+        document.getElementById("status-bar").textContent =
+          `Last refresh: ${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} IST`;
+      })
+      .catch(err => {
+        console.error("Poll error:", err);
+        document.getElementById("status-bar").textContent =
+          "⚠ Could not reach server — retrying…";
+      });
+  }
+
+  // Poll every 3 seconds; also run immediately on load
+  setInterval(updateDashboard, 3000);
+  updateDashboard();
+</script>
+</body>
+</html>
