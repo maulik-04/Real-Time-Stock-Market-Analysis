@@ -86,11 +86,6 @@ def consume_kafka():
         # Wait before retrying so we don't spam reconnection attempts
         threading.Event().wait(5)
 
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
 @app.route("/")
 def index():
     # Serve the dashboard HTML file directly
@@ -127,16 +122,9 @@ def health():
     return jsonify({"status": "ok", "buffer_sizes": counts})
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Start the Kafka consumer as a daemon thread so it exits automatically
-    # when the main Flask process exits (Ctrl+C)
+    
     t = threading.Thread(target=consume_kafka, daemon=True, name="kafka-consumer")
     t.start()
 
-    # debug=False in "production" (even local) because debug=True spawns a
-    # reloader subprocess which starts a second consumer thread and doubles
-    # every Kafka message
     app.run(host="0.0.0.0", port=5000, debug=False)
