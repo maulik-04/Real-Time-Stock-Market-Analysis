@@ -172,7 +172,7 @@ The frontend polls `/data` every 3 seconds, updates per-symbol stat cards (one p
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/maulik78/real-time-stock-market-analysis.git
+git clone https://github.com/maulik-04/real-time-stock-market-analysis.git
 cd real-time-stock-market-analysis
 
 # 2. Install Python dependencies
