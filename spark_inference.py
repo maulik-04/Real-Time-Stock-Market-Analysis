@@ -8,26 +8,19 @@ from pyspark.sql.types import (
     StringType, DoubleType,
 )
 
-# ---------------------------------------------------------------------------
-# Schema — must exactly match the payload dict produced by producer.py
-# ---------------------------------------------------------------------------
 schema = StructType([
-    StructField("symbol",    StringType()),
-    StructField("exchange",  StringType()),
-    StructField("ltp",       DoubleType()),
-    StructField("open",      DoubleType()),
-    StructField("high",      DoubleType()),
-    StructField("low",       DoubleType()),
-    StructField("close",     DoubleType()),
-    StructField("volume",    DoubleType()),
+    StructField("symbol", StringType()),
+    StructField("exchange", StringType()),
+    StructField("ltp", DoubleType()),
+    StructField("open", DoubleType()),
+    StructField("high", DoubleType()),
+    StructField("low", DoubleType()),
+    StructField("close", DoubleType()),
+    StructField("volume", DoubleType()),
     StructField("timestamp", StringType()),
 ])
 
-# ---------------------------------------------------------------------------
-# SparkSession
-# shuffle.partitions=1 is intentional for local/single-node mode —
-# raise this to match the number of Kafka partitions in production
-# ---------------------------------------------------------------------------
+
 spark = (
     SparkSession.builder
     .appName("RealTimeMovingAvg")
@@ -39,28 +32,18 @@ spark = (
     .getOrCreate()
 )
 
-# Reduce Spark's verbose logging so our print statements stay readable
 spark.sparkContext.setLogLevel("WARN")
 
-# ---------------------------------------------------------------------------
-# Source: read the raw Kafka stream from the "indian_stocks" topic
-# Each Kafka message has many columns; the JSON payload is in "value"
-# ---------------------------------------------------------------------------
 raw_stream = (
     spark.readStream
     .format("kafka")
     .option("kafka.bootstrap.servers", "localhost:9092")
     .option("subscribe", "indian_stocks")
-    # "latest" means we only process messages that arrive AFTER this job starts.
-    # Use "earliest" if you want to reprocess all historical messages in the topic.
     .option("startingOffsets", "latest")
     .load()
 )
 
-# ---------------------------------------------------------------------------
-# Parse the JSON value into typed columns
-# We only keep the three columns we actually need for windowed aggregation
-# ---------------------------------------------------------------------------
+
 parsed = (
     raw_stream
     .select(
@@ -73,7 +56,6 @@ parsed = (
         # so window() can do arithmetic on it
         to_timestamp(col("d.timestamp")).alias("timestamp"),
     )
-    # Drop rows where timestamp parsing failed (malformed messages)
     .filter(col("timestamp").isNotNull())
 )
 
@@ -91,8 +73,6 @@ parsed = (
 # Per-symbol aggregation inside each window:
 #   avg("ltp")  → the 5-minute moving average we want to plot
 #   last("ltp") → the most recent price seen IN THIS WINDOW
-#                 (fix: previously used max("ltp") which gives the highest
-#                  price in the window, not the most recent one)
 # ---------------------------------------------------------------------------
 aggregated = (
     parsed
@@ -103,15 +83,10 @@ aggregated = (
     )
     .agg(
         avg("ltp").alias("moving_avg"),
-        # last() with ignorenulls=True gives the final non-null ltp
-        # seen within the window — a correct proxy for "current price"
         last("ltp", ignorenulls=True).alias("ltp"),
     )
 )
 
-# ---------------------------------------------------------------------------
-# Flatten the nested window struct into plain string columns for JSON output
-# ---------------------------------------------------------------------------
 output = aggregated.select(
     col("symbol"),
     col("moving_avg").alias("avg"),
@@ -153,8 +128,8 @@ query = (
 
 print("Spark Structured Streaming started.")
 print("Reading from : indian_stocks")
-print("Writing to   : indian_avg")
-print("Window       : 5 minutes, sliding every 30 seconds")
-print("Watermark    : 3 minutes")
+print("Writing to : indian_avg")
+print("Window : 5 minutes, sliding every 30 seconds")
+print("Watermark : 3 minutes")
 
 query.awaitTermination()
