@@ -7,12 +7,9 @@ from datetime import datetime, timezone
 from kafka import KafkaProducer
 from dotenv import load_dotenv
 
-# Load credentials from .env file (never hardcode secrets in source code)
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Configuration — all secrets come from environment variables, not source code
-# ---------------------------------------------------------------------------
+
 KAFKA_SERVER = os.environ.get("KAFKA_SERVER", "localhost:9092")
 TOPIC = "indian_stocks"
 
@@ -24,28 +21,20 @@ if not API_KEY or not ACCESS_TOKEN:
     print("Copy .env.example to .env and fill in your credentials.")
     sys.exit(1)
 
-# ---------------------------------------------------------------------------
-# Upstox uses instrument keys (exchange|ISIN) to identify each stock
-# ---------------------------------------------------------------------------
+
 INSTRUMENT_KEYS = {
     "RELIANCE": "NSE_EQ|INE002A01018",
-    "TCS":      "NSE_EQ|INE467B01029",
+    "TCS": "NSE_EQ|INE467B01029",
     "HDFCBANK": "NSE_EQ|INE040A01034",
-    "INFY":     "NSE_EQ|INE009A01021",
+    "INFY": "NSE_EQ|INE009A01021",
 }
 
 INDIAN_SYMBOLS = list(INSTRUMENT_KEYS.keys())
 
-# ---------------------------------------------------------------------------
-# Kafka producer
-# value_serializer converts every Python dict to UTF-8 JSON bytes before send
-# ---------------------------------------------------------------------------
 producer = KafkaProducer(
     bootstrap_servers=KAFKA_SERVER,
     value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-    # How long (ms) to wait before giving up on a send
     request_timeout_ms=15_000,
-    # Retry up to 3 times on transient network errors
     retries=3,
 )
 
@@ -72,7 +61,6 @@ def get_stock_quote(symbol: str) -> dict | None:
                 f"https://api.upstox.com/v2/login/authorization/dialog"
                 f"?response_type=code&client_id={API_KEY}&redirect_uri=https://127.0.0.1"
             )
-            # Exit cleanly so the operator knows to refresh the token
             sys.exit(1)
 
         response.raise_for_status()
@@ -93,15 +81,14 @@ def build_payload(symbol: str, quote: dict) -> dict:
     """
     ohlc = quote.get("ohlc", {})
     return {
-        "symbol":    symbol,
-        "exchange":  "NSE",
-        "ltp":       quote.get("last_price", 0),
-        "open":      ohlc.get("open", 0),
-        "high":      ohlc.get("high", 0),
-        "low":       ohlc.get("low", 0),
-        "close":     ohlc.get("close", 0),
-        "volume":    quote.get("volume", 0),
-        # ISO-8601 UTC timestamp — Spark's to_timestamp() understands this format
+        "symbol": symbol,
+        "exchange": "NSE",
+        "ltp": quote.get("last_price", 0),
+        "open": ohlc.get("open", 0),
+        "high": ohlc.get("high", 0),
+        "low": ohlc.get("low", 0),
+        "close": ohlc.get("close", 0),
+        "volume": quote.get("volume", 0),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -146,6 +133,6 @@ def produce_data():
 if __name__ == "__main__":
     print("Starting Kafka producer")
     print(f"Kafka broker : {KAFKA_SERVER}")
-    print(f"Topic        : {TOPIC}")
-    print(f"Symbols      : {INDIAN_SYMBOLS}")
+    print(f"Topic : {TOPIC}")
+    print(f"Symbols : {INDIAN_SYMBOLS}")
     produce_data()
